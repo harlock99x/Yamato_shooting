@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>COSMO BATTLESHIP TACTICS</title>
+<style>
+  :root {
+    --bg-dark: #050a12;
+    --hud-cyan: #00f0ff;
+    --hud-green: #00ff66;
+    --hud-amber: #ffaa00;
+    --hud-red: #ff3344;
+    --hud-panel: rgba(7, 21, 38, 0.92);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-touch-callout: none; }
+  body {
+    background: var(--bg-dark);
+    color: #e0f0ff;
+    font-family: 'Consolas', 'Courier New', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    touch-action: manipulation;
+  }
+
+  /* TOP HUD */
+  #top-bar {
+    height: 44px;
+    background: linear-gradient(180deg, #0d2238 0%, rgba(5, 15, 28, 0.95) 100%);
+    border-bottom: 2px solid var(--hud-cyan);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    font-size: 11px;
+    z-index: 10;
+    flex-shrink: 0;
+  }
+  .title-tag {
+    font-weight: bold;
+    color: var(--hud-cyan);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+  }
+  .status-cluster {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .meter-box {
+    width: 60px;
+    height: 10px;
+    background: #020c17;
+    border: 1px solid var(--hud-cyan);
+    overflow: hidden;
+  }
+  .meter-fill {
+    height: 100%;
+    transition: width 0.15s ease-out;
+  }
+  .hull-fill { background: linear-gradient(90deg, var(--hud-red), var(--hud-green)); width: 100%; }
+  .shield-fill { background: linear-gradient(90deg, #0066ff, var(--hud-cyan)); width: 100%; }
+
+  /* BATTLEFIELD AREA */
+  #battle-area {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    background: radial-gradient(circle at 50% 50%, #0a1b2e 0%, #030810 100%);
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* BRIDGE LOG */
+  #bridge-log {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    max-width: 240px;
+    background: var(--hud-panel);
+    border: 1px solid #1a446c;
+    border-left: 3px solid var(--hud-cyan);
+    padding: 6px 8px;
+    font-size: 10px;
+    line-height: 1.4;
+    color: #9cd4ff;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  /* AUTOPILOT DOCTRINE (RIGHT TOP) */
+  #doctrine-panel {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-cyan);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    z-index: 5;
+  }
+  .doctrine-title {
+    font-size: 9px;
+    color: var(--hud-cyan);
+    letter-spacing: 0.5px;
+  }
+  .doctrine-btn {
+    background: rgba(0, 40, 70, 0.7);
+    border: 1px solid #0088aa;
+    color: #a0d8ef;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    border-radius: 3px;
+  }
+  .doctrine-btn.active {
+    background: var(--hud-cyan);
+    color: #03101c;
+    font-weight: bold;
+  }
+
+  /* BOTTOM WEAPON & ATB CONSOLE (SMARTPHONE GRID) */
+  #console-bar {
+    background: linear-gradient(0deg, #061322 0%, #0c2035 100%);
+    border-top: 2px solid var(--hud-cyan);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-gap: 6px;
+    padding: 8px;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.8);
+    z-index: 10;
+    flex-shrink: 0;
+  }
+  .weapon-card {
+    background: rgba(10, 30, 52, 0.9);
+    border: 1px solid #1a4d78;
+    border-radius: 4px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    min-height: 52px;
+  }
+  .weapon-card:active {
+    background: rgba(20, 60, 110, 0.95);
+  }
+  .weapon-card.ready {
+    border-color: var(--hud-green);
+    box-shadow: inset 0 0 8px rgba(0, 255, 102, 0.3);
+  }
+  .weapon-card.ready .atb-bar {
+    background: var(--hud-green);
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #88c0ee;
+  }
+  .card-name {
+    font-size: 11px;
+    font-weight: bold;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .atb-container {
+    width: 100%;
+    height: 6px;
+    background: #020912;
+    border: 1px solid #184065;
+    margin-top: 4px;
+  }
+  .atb-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--hud-cyan);
+    transition: width 0.08s linear;
+  }
+  .special-card {
+    border-color: var(--hud-amber);
+    background: rgba(30, 20, 10, 0.9);
+  }
+  .special-card.ready {
+    border-color: #ffcc00;
+  }
+  .special-card.ready .atb-bar {
+    background: linear-gradient(90deg, #ff8800, #ffdd00);
+  }
+</style>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <div id="top-bar">
+    <div class="title-tag">
+      <span style="color:#ff3344">◆</span> ヤマト型指揮管制
+    </div>
+    <div class="status-cluster">
+      <div class="stat-item">
+        <span>装甲:</span>
+        <div class="meter-box"><div id="hull-bar" class="meter-fill hull-fill"></div></div>
+      </div>
+      <div class="stat-item">
+        <span>防壁:</span>
+        <div class="meter-box"><div id="shield-bar" class="meter-fill shield-fill"></div></div>
+      </div>
+      <div class="stat-item">
+        <span>撃沈:</span>
+        <span id="score-text" style="color:var(--hud-cyan); font-weight:bold;">0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BATTLEFIELD AREA -->
+  <div id="battle-area">
+    <canvas id="canvas"></canvas>
+
+    <!-- BRIDGE COMM LOG -->
+    <div id="bridge-log">
+      <div id="dynamic-log">[戦闘指揮所] 全自動航行作戦開始。</div>
+    </div>
+
+    <!-- AUTOPILOT DOCTRINE -->
+    <div id="doctrine-panel">
+      <div class="doctrine-title">航行AI戦術</div>
+      <button class="doctrine-btn active" data-mode="broadside">舷側斉射 (Orbit)</button>
+      <button class="doctrine-btn" data-mode="assault">突撃交戦 (Charge)</button>
+      <button class="doctrine-btn" data-mode="keepRange">距離維持 (Keep)</button>
+    </div>
+  </div>
+
+  <!-- BOTTOM WEAPON & ATB CONSOLE -->
+  <div id="console-bar">
+    <div class="weapon-card" id="wcard-pulse" onclick="fireWeapon(0)">
+      <div class="card-top"><span>[1] 側舷</span><span class="w-status">READY</span></div>
+      <div class="card-name">パルスレーザー</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-0"></div></div>
+    </div>
+
+    <div class="weapon-card" id="wcard-cannon" onclick="fireWeapon(1)">
+      <div class="card-top"><span>[2] 艦首</span><span class="w-status">READY</span></div>
+      <div class="card-name">ショックカノン</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-1"></div></div>
+    </div>
+
+    <div class="weapon-card" id="wcard-torpedo" onclick="fireWeapon(2)">
+      <div class="card-top"><span>[3] 誘導</span><span class="w-status">READY</span></div>
+      <div class="card-name">艦首魚雷</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-2"></div></div>
+    </div>
+
+    <div class="weapon-card special-card" id="wcard-wave" onclick="fireWeapon(3)">
+      <div class="card-top"><span>[4] 必殺</span><span class="w-status">CT中</span></div>
+      <div class="card-name">波動砲</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-3"></div></div>
+    </div>
+
+    <div class="weapon-card" id="wcard-repair" onclick="useRepair()">
+      <div class="card-top"><span>[R] 工作班</span><span class="w-status">READY</span></div>
+      <div class="card-name">応急修理</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-repair"></div></div>
+    </div>
+
+    <div class="weapon-card" id="wcard-turn" onclick="emergencyTurn()">
+      <div class="card-top"><span>[SPACE]</span><span class="w-status">READY</span></div>
+      <div class="card-name">緊急回頭</div>
+      <div class="atb-container"><div class="atb-bar" id="atb-turn"></div></div>
+    </div>
+  </div>
+
+<script>
+// Web Audio API Sound Generator
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let actx = null;
+function initAudio() {
+  if (!actx) actx = new AudioCtx();
+  if (actx.state === 'suspended') actx.resume();
+}
+window.addEventListener('click', initAudio, { once: true });
+window.addEventListener('touchstart', initAudio, { once: true });
+
+const Sound = {
+  laser() {
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const g = actx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(880, actx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(110, actx.currentTime + 0.12);
+    g.gain.setValueAtTime(0.12, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.12);
+    osc.connect(g); g.connect(actx.destination);
+    osc.start(); osc.stop(actx.currentTime + 0.12);
+  },
+  cannon() {
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const g = actx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(260, actx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, actx.currentTime + 0.35);
+    g.gain.setValueAtTime(0.3, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.35);
+    osc.connect(g); g.connect(actx.destination);
+    osc.start(); osc.stop(actx.currentTime + 0.35);
+  },
+  collision() {
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const g = actx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(90, actx.currentTime);
+    osc.frequency.linearRampToValueAtTime(30, actx.currentTime + 0.25);
+    g.gain.setValueAtTime(0.35, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.25);
+    osc.connect(g); g.connect(actx.destination);
+    osc.start(); osc.stop(actx.currentTime + 0.25);
+  },
+  wave() {
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const g = actx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150, actx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1200, actx.currentTime + 0.8);
+    g.gain.setValueAtTime(0.4, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.9);
+    osc.connect(g); g.connect(actx.destination);
+    osc.start(); osc.stop(actx.currentTime + 0.9);
+  }
+};
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  W = canvas.width = rect.width;
+  H = canvas.height = rect.height;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// STATE
+let score = 0;
+let shakeTime = 0;
+let autopilotMode = 'broadside';
+
+const player = {
+  x: W / 2, y: H / 2,
+  angle: -Math.PI / 2,
+  vx: 0, vy: 0,
+  speed: 1.8,
+  rotSpeed: 0.045,
+  radius: 26,
+  hull: 100, maxHull: 100,
+  shield: 100, maxShield: 100
+};
+
+const weapons = [
+  { name: 'パルスレーザー', ct: 0.8, timer: 0.8 },
+  { name: '主砲ショックカノン', ct: 2.2, timer: 2.2 },
+  { name: '艦首魚雷', ct: 3.5, timer: 3.5 },
+  { name: '波動砲', ct: 14.0, timer: 0 }
+];
+let repairTimer = 15.0; const repairCT = 15.0;
+let turnTimer = 6.0; const turnCT = 6.0;
+
+let bullets = [];
+let particles = [];
+let enemies = [];
+let waveBeam = null;
+
+// SPAWN ENEMY
+function spawnEnemy() {
+  const side = Math.floor(Math.random() * 4);
+  let ex, ey;
+  if (side === 0) { ex = Math.random() * W; ey = -40; }
+  else if (side === 1) { ex = W + 40; ey = Math.random() * H; }
+  else if (side === 2) { ex = Math.random() * W; ey = H + 40; }
+  else { ex = -40; ey = Math.random() * H; }
+  enemies.push({
+    x: ex, y: ey,
+    angle: 0, vx: 0, vy: 0,
+    radius: 20,
+    hp: 45, maxHp: 45,
+    fireTimer: Math.random() * 2
+  });
+}
+setInterval(() => { if (enemies.length < 5) spawnEnemy(); }, 2500);
+
+// LOG DISPLAY
+function setLog(text, alert = false) {
+  const el = document.getElementById('dynamic-log');
+  el.textContent = text;
+  el.style.color = alert ? 'var(--hud-red)' : '#9cd4ff';
+}
+
+// DOCTRINE SELECT
+document.querySelectorAll('.doctrine-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    document.querySelectorAll('.doctrine-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    autopilotMode = btn.dataset.mode;
+    setLog(`航行AI: ドクトリン【${btn.textContent}】へ移行`);
+  });
+});
+
+// AUTOPILOT AI
+function updateAutopilot() {
+  let target = null;
+  let minDist = Infinity;
+  for (const en of enemies) {
+    const d = Math.hypot(en.x - player.x, en.y - player.y);
+    if (d < minDist) { minDist = d; target = en; }
+  }
+
+  let desiredAngle = player.angle;
+  let thrust = 0.6;
+
+  if (target) {
+    const directAngle = Math.atan2(target.y - player.y, target.x - player.x);
+    if (autopilotMode === 'broadside') {
+      const orbitAngle = directAngle + Math.PI / 2;
+      desiredAngle = (minDist > 160) ? directAngle + 0.3 : orbitAngle;
+      thrust = (minDist < 120) ? -0.2 : 0.8;
+    } else if (autopilotMode === 'assault') {
+      desiredAngle = directAngle;
+      thrust = 1.2;
+    } else if (autopilotMode === 'keepRange') {
+      desiredAngle = directAngle;
+      thrust = (minDist < 240) ? -1.0 : (minDist > 320 ? 0.8 : 0);
+    }
+  }
+
+  let diff = desiredAngle - player.angle;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  player.angle += Math.sign(diff) * Math.min(Math.abs(diff), player.rotSpeed);
+
+  player.vx += Math.cos(player.angle) * thrust * 0.15;
+  player.vy += Math.sin(player.angle) * thrust * 0.15;
+}
+
+// WEAPONS
+function fireWeapon(idx) {
+  initAudio();
+  const w = weapons[idx];
+  if (w.timer < w.ct) return;
+  w.timer = 0;
+
+  if (idx === 0) { // PULSE LASER
+    Sound.laser();
+    const l1 = player.angle - Math.PI / 2;
+    const l2 = player.angle + Math.PI / 2;
+    [-0.2, 0, 0.2].forEach(off => {
+      bullets.push({ x: player.x, y: player.y, vx: Math.cos(l1 + off) * 7, vy: Math.sin(l1 + off) * 7, life: 35, dmg: 8, col: '#00f0ff', r: 3 });
+      bullets.push({ x: player.x, y: player.y, vx: Math.cos(l2 + off) * 7, vy: Math.sin(l2 + off) * 7, life: 35, dmg: 8, col: '#00f0ff', r: 3 });
+    });
+  } else if (idx === 1) { // SHOCK CANNON
+    Sound.cannon();
+    [-0.1, 0.1].forEach(off => {
+      bullets.push({ x: player.x, y: player.y, vx: Math.cos(player.angle + off) * 9, vy: Math.sin(player.angle + off) * 9, life: 55, dmg: 28, col: '#00ff66', r: 5 });
+    });
+  } else if (idx === 2) { // TORPEDO
+    Sound.cannon();
+    [-0.25, 0.25].forEach(off => {
+      bullets.push({ x: player.x, y: player.y, vx: Math.cos(player.angle + off) * 3.5, vy: Math.sin(player.angle + off) * 3.5, life: 90, dmg: 40, col: '#ffaa00', r: 6, homing: true });
+    });
+  } else if (idx === 3) { // WAVE CANNON
+    Sound.wave();
+    shakeTime = 30;
+    waveBeam = { x: player.x, y: player.y, angle: player.angle, life: 25, maxLife: 25 };
+    setLog('波動砲発射！前方宙域を一掃！', true);
+  }
+}
+
+function useRepair() {
+  if (repairTimer < repairCT) return;
+  repairTimer = 0;
+  player.hull = Math.min(player.maxHull, player.hull + 40);
+  setLog('工作班: 艦体応急修理完了 (+40%)');
+}
+
+function emergencyTurn() {
+  if (turnTimer < turnCT) return;
+  turnTimer = 0;
+  player.angle += Math.PI;
+  player.vx *= -0.5; player.vy *= -0.5;
+  shakeTime = 8;
+  setLog('操舵室: 180度緊急急回頭実行！');
+}
+
+// MAIN LOOP
+let lastT = performance.now();
+function loop(now) {
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+
+  // RECHARGE
+  weapons.forEach(w => { if (w.timer < w.ct) w.timer += dt; });
+  if (repairTimer < repairCT) repairTimer += dt;
+  if (turnTimer < turnCT) turnTimer += dt;
+  if (player.shield < player.maxShield) player.shield += dt * 3.5;
+
+  updateAutopilot();
+
+  // INERTIA & POSITION
+  player.vx *= 0.94; player.vy *= 0.94;
+  player.x += player.vx; player.y += player.vy;
+  player.x = Math.max(30, Math.min(W - 30, player.x));
+  player.y = Math.max(30, Math.min(H - 30, player.y));
+
+  // HARD SEPARATION & BOUNCE (ENEMIES VS PLAYER)
+  for (let i = 0; i < enemies.length; i++) {
+    const en = enemies[i];
+    const dx = en.x - player.x;
+    const dy = en.y - player.y;
+    const dist = Math.hypot(dx, dy);
+    const minDist = player.radius + en.radius;
+
+    if (dist < minDist && dist > 0.001) {
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const overlap = minDist - dist;
+
+      // 完全押し戻し
+      player.x -= nx * overlap * 0.4;
+      player.y -= ny * overlap * 0.4;
+      en.x += nx * overlap * 0.6;
+      en.y += ny * overlap * 0.6;
+
+      // 弾性反発バウンス
+      player.vx -= nx * 4.0;
+      player.vy -= ny * 4.0;
+      en.vx += nx * 6.0;
+      en.vy += ny * 6.0;
+
+      Sound.collision();
+      shakeTime = 12;
+      player.hull -= 6;
+      en.hp -= 15;
+      setLog('操舵室: 敵艦と衝突！強い衝撃！', true);
+    }
+
+    // 敵同士の重なり分離
+    for (let j = i + 1; j < enemies.length; j++) {
+      const en2 = enemies[j];
+      const ex = en2.x - en.x;
+      const ey = en2.y - en.y;
+      const edist = Math.hypot(ex, ey);
+      const emim = en.radius + en2.radius;
+      if (edist < emim && edist > 0.001) {
+        const enx = ex / edist;
+        const eny = ey / edist;
+        const eover = emim - edist;
+        en.x -= enx * eover * 0.5;
+        en.y -= eny * eover * 0.5;
+        en2.x += enx * eover * 0.5;
+        en2.y += eny * eover * 0.5;
+      }
+    }
+  }
+
+  // UPDATE ENEMIES
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const en = enemies[i];
+    const dx = player.x - en.x;
+    const dy = player.y - en.y;
+    en.angle = Math.atan2(dy, dx);
+    en.vx += Math.cos(en.angle) * 0.1;
+    en.vy += Math.sin(en.angle) * 0.1;
+    en.vx *= 0.95; en.vy *= 0.95;
+    en.x += en.vx; en.y += en.vy;
+
+    en.fireTimer += dt;
+    if (en.fireTimer > 2.8) {
+      en.fireTimer = 0;
+      bullets.push({ x: en.x, y: en.y, vx: Math.cos(en.angle) * 4, vy: Math.sin(en.angle) * 4, life: 60, dmg: 10, col: '#ff3344', isEnemy: true, r: 3 });
+    }
+
+    if (en.hp <= 0) {
+      for (let p = 0; p < 16; p++) {
+        particles.push({ x: en.x, y: en.y, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, life: 25, col: '#ff8800' });
+      }
+      enemies.splice(i, 1);
+      score++;
+      setLog('レーダー室: 敵艦撃沈を確認！');
+    }
+  }
+
+  // UPDATE BULLETS
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    if (b.homing && enemies.length > 0) {
+      const en = enemies[0];
+      const hAngle = Math.atan2(en.y - b.y, en.x - b.x);
+      b.vx += Math.cos(hAngle) * 0.4;
+      b.vy += Math.sin(hAngle) * 0.4;
+      const spd = Math.hypot(b.vx, b.vy);
+      if (spd > 6) { b.vx = (b.vx / spd) * 6; b.vy = (b.vy / spd) * 6; }
+    }
+    b.x += b.vx; b.y += b.vy;
+    b.life--;
+
+    if (!b.isEnemy) {
+      for (const en of enemies) {
+        if (Math.hypot(en.x - b.x, en.y - b.y) < en.radius + b.r) {
+          en.hp -= b.dmg;
+          b.life = 0;
+          break;
+        }
+      }
+    } else {
+      if (Math.hypot(player.x - b.x, player.y - b.y) < player.radius + b.r) {
+        if (player.shield > 0) player.shield -= b.dmg * 1.2;
+        else player.hull -= b.dmg;
+        b.life = 0;
+        shakeTime = 6;
+      }
+    }
+    if (b.life <= 0) bullets.splice(i, 1);
+  }
+
+  // WAVE BEAM SWEEP
+  if (waveBeam) {
+    waveBeam.life--;
+    for (const en of enemies) {
+      const bx = en.x - waveBeam.x;
+      const by = en.y - waveBeam.y;
+      const proj = bx * Math.cos(waveBeam.angle) + by * Math.sin(waveBeam.angle);
+      const perp = Math.abs(-bx * Math.sin(waveBeam.angle) + by * Math.cos(waveBeam.angle));
+      if (proj > 0 && perp < 45) en.hp -= 4;
+    }
+    if (waveBeam.life <= 0) waveBeam = null;
+  }
+
+  // DRAW
+  ctx.save();
+  if (shakeTime > 0) {
+    ctx.translate((Math.random() - 0.5) * shakeTime, (Math.random() - 0.5) * shakeTime);
+    shakeTime--;
+  }
+  ctx.clearRect(0, 0, W, H);
+
+  // RADAR CIRCLES
+  ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+  ctx.lineWidth = 1;
+  [80, 160, 240, 320].forEach(r => {
+    ctx.beginPath(); ctx.arc(player.x, player.y, r, 0, Math.PI * 2); ctx.stroke();
+  });
+
+  // PARTICLES
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.life--;
+    ctx.fillStyle = p.col;
+    ctx.fillRect(p.x, p.y, 3, 3);
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // BULLETS
+  for (const b of bullets) {
+    ctx.fillStyle = b.col;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // WAVE BEAM DRAW
+  if (waveBeam) {
+    ctx.save();
+    ctx.translate(waveBeam.x, waveBeam.y);
+    ctx.rotate(waveBeam.angle);
+    ctx.fillStyle = `rgba(0, 240, 255, ${waveBeam.life / waveBeam.maxLife})`;
+    ctx.fillRect(0, -25, 800, 50);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, -8, 800, 16);
+    ctx.restore();
+  }
+
+  // PLAYER SHIP
+  ctx.save();
+  ctx.translate(player.x, player.y);
+  ctx.rotate(player.angle);
+  ctx.fillStyle = '#2a486c';
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(30, 0); ctx.lineTo(-24, -14); ctx.lineTo(-18, 0); ctx.lineTo(-24, 14);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  // ENEMIES
+  for (const en of enemies) {
+    ctx.save();
+    ctx.translate(en.x, en.y);
+    ctx.rotate(en.angle);
+    ctx.fillStyle = '#6a2020';
+    ctx.strokeStyle = '#ff3344';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(20, 0); ctx.lineTo(-16, -12); ctx.lineTo(-16, 12);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  ctx.restore();
+
+  // HUD UPDATE
+  document.getElementById('hull-bar').style.width = `${Math.max(0, player.hull)}%`;
+  document.getElementById('shield-bar').style.width = `${Math.max(0, player.shield)}%`;
+  document.getElementById('score-text').textContent = score;
+
+  weapons.forEach((w, idx) => {
+    const pct = Math.min(100, (w.timer / w.ct) * 100);
+    document.getElementById(`atb-${idx}`).style.width = `${pct}%`;
+    const card = document.querySelectorAll('.weapon-card')[idx];
+    if (pct >= 100) card.classList.add('ready');
+    else card.classList.remove('ready');
+  });
+
+  const repPct = Math.min(100, (repairTimer / repairCT) * 100);
+  document.getElementById('atb-repair').style.width = `${repPct}%`;
+  const turnPct = Math.min(100, (turnTimer / turnCT) * 100);
+  document.getElementById('atb-turn').style.width = `${turnPct}%`;
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
