@@ -1,0 +1,1583 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>COSMO DREADNOUGHT - Tactical ATB Space Combat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@500;700;900&display=swap');
+
+    body {
+      background-color: #030712;
+      font-family: 'Share Tech Mono', monospace;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .font-hud {
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    /* Radar scanline effect */
+    .scanlines {
+      background: linear-gradient(
+        rgba(18, 16, 16, 0) 50%, 
+        rgba(0, 255, 180, 0.03) 50%
+      ), linear-gradient(
+        90deg,
+        rgba(255, 0, 0, 0.03),
+        rgba(0, 255, 0, 0.01),
+        rgba(0, 0, 255, 0.03)
+      );
+      background-size: 100% 4px, 6px 100%;
+      pointer-events: none;
+    }
+
+    .glow-cyan {
+      text-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+    }
+    .glow-amber {
+      text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+    }
+    .glow-red {
+      text-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+    }
+
+    /* Cooldown gauge transition */
+    .cd-bar {
+      transition: width 0.06s linear;
+    }
+  </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-between p-2 md:p-3 text-cyan-400 select-none relative">
+
+  <!-- Scanline Overlay -->
+  <div class="scanlines absolute inset-0 z-20 pointer-events-none"></div>
+
+  <!-- TOP HUD: Stats, Wave & Hull Status -->
+  <header class="w-full max-w-6xl flex items-center justify-between border-b border-cyan-800/80 pb-2 z-10 bg-slate-950/80 backdrop-blur px-3 rounded-lg">
+    <div class="flex items-center gap-3">
+      <div class="w-3 h-3 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]"></div>
+      <h1 class="font-hud text-lg md:text-xl font-bold tracking-wider text-cyan-200">BATTLESHIP YAMATO <span class="text-xs text-cyan-500 font-mono">MK-VII</span></h1>
+    </div>
+
+    <!-- WAVE & SCORE -->
+    <div class="flex items-center gap-6">
+      <div class="text-center">
+        <span class="text-xs text-slate-400 block tracking-widest">WAVE</span>
+        <span id="ui-wave" class="font-hud text-lg font-bold text-amber-400 glow-amber">1</span>
+      </div>
+      <div class="text-center">
+        <span class="text-xs text-slate-400 block tracking-widest">ENEMIES</span>
+        <span id="ui-enemies" class="font-hud text-lg font-bold text-red-400 glow-red">0</span>
+      </div>
+      <div class="text-center">
+        <span class="text-xs text-slate-400 block tracking-widest">SCORE</span>
+        <span id="ui-score" class="font-hud text-lg font-bold text-cyan-300 glow-cyan">00000</span>
+      </div>
+    </div>
+
+    <!-- HULL & DEFLECTOR SHIELD -->
+    <div class="flex items-center gap-4 w-52 md:w-64">
+      <div class="w-full flex flex-col gap-1 text-xs">
+        <div class="flex justify-between items-center">
+          <span class="text-sky-400 font-bold">SHIELD</span>
+          <span id="ui-shield-val" class="font-mono text-sky-300">100%</span>
+        </div>
+        <div class="w-full bg-slate-800 h-2 rounded overflow-hidden p-[1px] border border-sky-600/40">
+          <div id="ui-shield-bar" class="h-full bg-gradient-to-r from-sky-500 to-cyan-300 rounded-sm w-full"></div>
+        </div>
+
+        <div class="flex justify-between items-center mt-1">
+          <span class="text-red-400 font-bold">ARMOR</span>
+          <span id="ui-hull-val" class="font-mono text-red-300">100%</span>
+        </div>
+        <div class="w-full bg-slate-800 h-2.5 rounded overflow-hidden p-[1px] border border-red-600/40">
+          <div id="ui-hull-bar" class="h-full bg-gradient-to-r from-red-600 via-amber-500 to-emerald-400 rounded-sm w-full"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN RADAR / TACTICAL DISPLAY -->
+  <div class="relative w-full max-w-6xl flex-1 my-2 bg-slate-950 border border-cyan-800/60 rounded-xl overflow-hidden shadow-[inset_0_0_30px_rgba(6,182,212,0.15)] flex items-center justify-center">
+    <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+
+    <!-- BRIDGE COMMS LOG (Top Left Overlay) -->
+    <div class="absolute top-2 left-2 max-w-[260px] md:max-w-xs pointer-events-none z-10 flex flex-col gap-1">
+      <div class="text-[10px] text-cyan-400 font-bold bg-slate-900/80 px-2 py-0.5 rounded border border-cyan-800/50 backdrop-blur w-fit">
+        BRIDGE COMMS & AUTOPILOT
+      </div>
+      <div id="comms-log" class="text-[11px] text-cyan-200 bg-slate-950/80 p-2 rounded border border-cyan-900/60 backdrop-blur space-y-1 font-mono shadow-md">
+        <p class="text-emerald-400">航海科: オートクルーズ待機中</p>
+      </div>
+    </div>
+
+    <!-- CENTER OVERLAY MESSAGES (Wave Cleared, Ready, Game Over) -->
+    <div id="modal-container" class="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-30 transition-opacity">
+      <div id="modal-box" class="bg-slate-900 border-2 border-cyan-500/80 rounded-2xl p-6 md:p-8 max-w-md w-11/12 text-center shadow-[0_0_35px_rgba(6,182,212,0.4)]">
+        <h2 id="modal-title" class="font-hud text-2xl md:text-3xl font-extrabold text-cyan-300 tracking-wider mb-2">TACTICAL ALERT</h2>
+        <p id="modal-desc" class="text-sm md:text-base text-slate-300 mb-6 leading-relaxed">
+          Enemy Fleet approaching warp corridor. Maneuver your battleship, broadside pulse-lasers, and charge the Wave Cannon!
+        </p>
+        <div class="flex justify-center gap-3">
+          <button id="btn-modal-start" class="font-hud px-6 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-lg shadow-lg shadow-cyan-500/30 transform active:scale-95 transition">
+            ENGAGE BATTLE
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM COMMAND CONSOLE (ATB WEAPONS & TACTICAL ACTIONS) -->
+  <footer class="w-full max-w-6xl bg-slate-950/90 border border-cyan-900/80 rounded-xl p-2.5 z-10 flex flex-col md:flex-row gap-2 justify-between items-center backdrop-blur">
+    
+    <!-- AUTOPILOT TACTICAL DOCTRINE SELECTOR -->
+    <div class="flex flex-col gap-1 w-full md:w-auto">
+      <span class="text-[10px] font-bold tracking-wider text-cyan-400">AUTOPILOT 戦術方針</span>
+      <div class="flex items-center gap-1.5 bg-slate-900 p-1 rounded-lg border border-cyan-950">
+        <button id="mode-broadside" class="px-2 py-1.5 text-xs font-bold rounded border border-cyan-500 bg-cyan-950/60 text-cyan-200 transition">
+          舷側斉射
+        </button>
+        <button id="mode-assault" class="px-2 py-1.5 text-xs font-bold rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-cyan-200 transition">
+          突撃交戦
+        </button>
+        <button id="mode-kite" class="px-2 py-1.5 text-xs font-bold rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-cyan-200 transition">
+          距離維持
+        </button>
+      </div>
+    </div>
+
+    <!-- WEAPON BUTTONS WITH ATB / COOLDOWN BARS -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full md:w-auto flex-1 max-w-3xl">
+      
+      <!-- 1. PULSE LASERS (Broadside & Point Defense) -->
+      <button id="btn-pulse" class="group relative bg-slate-900 border border-cyan-700/60 hover:border-cyan-400 rounded-lg p-2 flex flex-col text-left overflow-hidden transition active:scale-95">
+        <div class="flex justify-between items-center w-full mb-1">
+          <span class="text-xs font-bold text-cyan-300">[1] パルスレーザー</span>
+          <span id="cd-pulse-text" class="text-[10px] text-emerald-400 font-mono">READY</span>
+        </div>
+        <div class="text-[11px] text-slate-400">舷側・近接迎撃 (射程:中)</div>
+        <div class="w-full bg-slate-800 h-1.5 rounded mt-2 overflow-hidden">
+          <div id="bar-pulse" class="cd-bar h-full bg-emerald-400 w-full"></div>
+        </div>
+      </button>
+
+      <!-- 2. SHOCK CANNONS (Forward Heavy Turrets) -->
+      <button id="btn-shock" class="group relative bg-slate-900 border border-cyan-700/60 hover:border-cyan-400 rounded-lg p-2 flex flex-col text-left overflow-hidden transition active:scale-95">
+        <div class="flex justify-between items-center w-full mb-1">
+          <span class="text-xs font-bold text-amber-300">[2] 主砲ショックカノン</span>
+          <span id="cd-shock-text" class="text-[10px] text-emerald-400 font-mono">READY</span>
+        </div>
+        <div class="text-[11px] text-slate-400">艦首集中重射撃 (大威力)</div>
+        <div class="w-full bg-slate-800 h-1.5 rounded mt-2 overflow-hidden">
+          <div id="bar-shock" class="cd-bar h-full bg-amber-400 w-full"></div>
+        </div>
+      </button>
+
+      <!-- 3. TORPEDO SALVO (Forward/Tracking) -->
+      <button id="btn-torpedo" class="group relative bg-slate-900 border border-cyan-700/60 hover:border-cyan-400 rounded-lg p-2 flex flex-col text-left overflow-hidden transition active:scale-95">
+        <div class="flex justify-between items-center w-full mb-1">
+          <span class="text-xs font-bold text-sky-300">[3] 艦首魚雷一斉発射</span>
+          <span id="cd-torpedo-text" class="text-[10px] text-emerald-400 font-mono">READY</span>
+        </div>
+        <div class="text-[11px] text-slate-400">誘導魚雷 x4 (装甲破壊)</div>
+        <div class="w-full bg-slate-800 h-1.5 rounded mt-2 overflow-hidden">
+          <div id="bar-torpedo" class="cd-bar h-full bg-sky-400 w-full"></div>
+        </div>
+      </button>
+
+      <!-- 4. WAVE MOTION CANNON (Decimator Beam) -->
+      <button id="btn-wave" class="group relative bg-slate-900 border-2 border-red-600/60 hover:border-red-400 rounded-lg p-2 flex flex-col text-left overflow-hidden transition active:scale-95 shadow-[0_0_12px_rgba(239,68,68,0.2)]">
+        <div class="flex justify-between items-center w-full mb-1">
+          <span class="text-xs font-bold text-red-300 glow-red">[4] 波動砲</span>
+          <span id="cd-wave-text" class="text-[10px] text-red-400 font-mono">CHARGING</span>
+        </div>
+        <div class="text-[11px] text-red-200">直線殲滅大口径ビーム</div>
+        <div class="w-full bg-slate-800 h-1.5 rounded mt-2 overflow-hidden">
+          <div id="bar-wave" class="cd-bar h-full bg-red-500 w-0"></div>
+        </div>
+      </button>
+
+    </div>
+
+    <!-- TACTICAL BOOST & EMERGENCY REPAIR -->
+    <div class="flex items-center gap-2">
+      <button id="btn-evasion" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-cyan-300 rounded-lg text-xs font-bold transition flex flex-col items-center">
+        <span>緊急反転 [SPACE]</span>
+        <span id="cd-evasion-text" class="text-[9px] text-emerald-400">READY</span>
+      </button>
+      <button id="btn-repair" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-emerald-300 rounded-lg text-xs font-bold transition flex flex-col items-center">
+        <span>応急修理 [R]</span>
+        <span id="cd-repair-text" class="text-[9px] text-emerald-400">READY</span>
+      </button>
+    </div>
+
+  </footer>
+
+  <!-- JAVASCRIPT GAME LOGIC -->
+  <script>
+    // --- Web Audio Synth Sound FX ---
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    const Sound = {
+      laser() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(150, audioCtx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.13);
+      },
+      shockCannon() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(260, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.35);
+        gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.36);
+      },
+      torpedo() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(320, audioCtx.currentTime + 0.25);
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.26);
+      },
+      collision() {
+        if (!audioCtx) return;
+        // Heavy metallic crunch & thud
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.28);
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(600, audioCtx.currentTime);
+        filter.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.28);
+
+        gain.gain.setValueAtTime(0.45, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.28);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.29);
+      },
+      waveCannon() {
+        if (!audioCtx) return;
+        // Low thunderous drone + rising frequency
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(90, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(450, audioCtx.currentTime + 0.8);
+        gain.gain.setValueAtTime(0.45, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.9);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.9);
+      },
+      explosion(isHeavy = false) {
+        if (!audioCtx) return;
+        const dur = isHeavy ? 0.6 : 0.25;
+        const bufferSize = audioCtx.sampleRate * dur;
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(isHeavy ? 400 : 800, audioCtx.currentTime);
+        filter.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + dur);
+
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(isHeavy ? 0.45 : 0.25, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(audioCtx.destination);
+        noise.start();
+      },
+      ping() {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.36);
+      },
+      collision() {
+        if (!audioCtx) return;
+        // Heavy metallic crunch + low rumble
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.28);
+        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.28);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.29);
+      }
+    };
+
+    // --- GAME ENGINE SETUP ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let viewWidth = 0;
+    let viewHeight = 0;
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * window.devicePixelRatio;
+      canvas.height = rect.height * window.devicePixelRatio;
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      viewWidth = rect.width;
+      viewHeight = rect.height;
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // --- GAME STATE ---
+    let gameState = 'START'; // START, PLAYING, WAVECLEAR, GAMEOVER
+    let wave = 1;
+    let score = 0;
+    let lastTime = performance.now();
+    let screenShake = 0;
+    let autoPilotMode = 'broadside'; // 'broadside', 'assault', 'kite'
+
+    // Inputs
+    const keys = {
+      Space: false, KeyR: false, Digit1: false, Digit2: false, Digit3: false, Digit4: false
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = true;
+      }
+      if (e.code === 'Digit1') firePulseLaser();
+      if (e.code === 'Digit2') fireShockCannon();
+      if (e.code === 'Digit3') fireTorpedoes();
+      if (e.code === 'Digit4') fireWaveMotionCannon();
+      if (e.code === 'Space') tacticalEvasion();
+      if (e.code === 'KeyR') triggerRepair();
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = false;
+      }
+    });
+
+    // --- BRIDGE COMMS LOG SYSTEM ---
+    function postBridgeLog(msg, color = 'text-cyan-300') {
+      const log = document.getElementById('comms-log');
+      if (!log) return;
+      const p = document.createElement('p');
+      p.className = color;
+      p.innerText = msg;
+      log.prepend(p);
+      while (log.children.length > 3) {
+        log.removeChild(log.lastChild);
+      }
+    }
+
+    // Autopilot Mode Selection
+    function setAutopilotMode(mode) {
+      autoPilotMode = mode;
+      const bBroad = document.getElementById('mode-broadside');
+      const bAssault = document.getElementById('mode-assault');
+      const bKite = document.getElementById('mode-kite');
+      [bBroad, bAssault, bKite].forEach(b => {
+        b.className = 'px-2 py-1.5 text-xs font-bold rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-cyan-200 transition';
+      });
+      if (mode === 'broadside') {
+        bBroad.className = 'px-2 py-1.5 text-xs font-bold rounded border border-cyan-500 bg-cyan-950/70 text-cyan-200 transition';
+        postBridgeLog('操舵室: 舷側斉射ドクトリンへ移行。左右斉射位置を維持！', 'text-emerald-400');
+      } else if (mode === 'assault') {
+        bAssault.className = 'px-2 py-1.5 text-xs font-bold rounded border border-amber-500 bg-amber-950/70 text-amber-200 transition';
+        postBridgeLog('操舵室: 突撃交戦へ移行！機関全速、敵陣へ突入！', 'text-amber-400');
+      } else if (mode === 'kite') {
+        bKite.className = 'px-2 py-1.5 text-xs font-bold rounded border border-sky-500 bg-sky-950/70 text-sky-200 transition';
+        postBridgeLog('操舵室: 距離維持航行。長距離砲撃態勢をキープ！', 'text-sky-400');
+      }
+    }
+
+    document.getElementById('mode-broadside').onclick = () => setAutopilotMode('broadside');
+    document.getElementById('mode-assault').onclick = () => setAutopilotMode('assault');
+    document.getElementById('mode-kite').onclick = () => setAutopilotMode('kite');
+
+    // --- PLAYER BATTLESHIP DEFINITION (Yamato PS1 Archetype) ---
+    const player = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      angle: -Math.PI / 2, // Facing North initially
+      targetAngle: -Math.PI / 2,
+      speed: 0,
+      maxSpeed: 2.6,
+      accel: 0.08,
+      turnSpeed: 0.045,
+      radius: 22, // Collision radius
+      mass: 8,    // Heavy battleship mass
+      maxShield: 150,
+      shield: 150,
+      shieldRegen: 4.0, // per second
+      maxHull: 250,
+      hull: 250,
+
+      // Weapon ATB / Cooldowns (in seconds)
+      weapons: {
+        pulse: { cd: 1.0, timer: 1.0, ready: true, name: 'PULSE LASER' },
+        shock: { cd: 4.0, timer: 4.0, ready: true, name: 'SHOCK CANNON' },
+        torpedo: { cd: 6.5, timer: 6.5, ready: true, name: 'TORPEDO' },
+        wave: { cd: 12.0, timer: 0.0, ready: false, name: 'WAVE CANNON', charging: false }
+      },
+      evasionCD: { cd: 4.5, timer: 4.5 },
+      repairCD: { cd: 10.0, timer: 10.0 }
+    };
+
+    // --- ENTITY ARRAYS ---
+    let enemies = [];
+    let projectiles = [];
+    let enemyProjectiles = [];
+    let particles = [];
+    let waveBeam = null; // Active Wave Motion Cannon Ray
+    let stars = [];
+
+    // Background Stars
+    function initStars() {
+      stars = [];
+      for (let i = 0; i < 90; i++) {
+        stars.push({
+          x: Math.random() * 2000,
+          y: Math.random() * 2000,
+          size: Math.random() * 1.5 + 0.5,
+          alpha: Math.random() * 0.8 + 0.2
+        });
+      }
+    }
+
+    // --- SPAWN WAVE ---
+    function spawnWave(w) {
+      enemies = [];
+      const count = 3 + w * 2;
+      for (let i = 0; i < count; i++) {
+        const typeRoll = Math.random();
+        let type = 'cruiser';
+        if (typeRoll < 0.4) type = 'corvette';      // Fast swarm
+        else if (typeRoll < 0.8) type = 'cruiser';   // Balanced, fires lasers & missiles
+        else type = 'dreadnought';                   // Heavy capital ship
+
+        // Spawn on borders
+        let ex, ey;
+        if (Math.random() < 0.5) {
+          ex = Math.random() < 0.5 ? -40 : viewWidth + 40;
+          ey = Math.random() * viewHeight;
+        } else {
+          ex = Math.random() * viewWidth;
+          ey = Math.random() < 0.5 ? -40 : viewHeight + 40;
+        }
+
+        const hpMap = { corvette: 30 + w * 5, cruiser: 85 + w * 15, dreadnought: 220 + w * 40 };
+        const speedMap = { corvette: 1.6, cruiser: 0.95, dreadnought: 0.55 };
+        const radiusMap = { corvette: 12, cruiser: 18, dreadnought: 28 };
+        const massMap = { corvette: 1.5, cruiser: 3.5, dreadnought: 10.0 };
+
+        enemies.push({
+          type,
+          x: ex,
+          y: ey,
+          vx: 0,
+          vy: 0,
+          angle: Math.random() * Math.PI * 2,
+          speed: speedMap[type],
+          radius: radiusMap[type],
+          mass: massMap[type],
+          maxHp: hpMap[type],
+          hp: hpMap[type],
+          shootCooldown: Math.random() * 2 + 1.5,
+          beamCharge: 0
+        });
+      }
+      Sound.ping();
+      updateEnemyCountHUD();
+      postBridgeLog(`レーダー室: 敵ワープ反応 x${enemies.length} を捕捉！`, 'text-red-400');
+    }
+
+    function updateEnemyCountHUD() {
+      document.getElementById('ui-enemies').innerText = enemies.length;
+    }
+
+    // --- WEAPON LOGIC ---
+    // 1. PULSE LASERS: Fires broadside batteries from left & right sides, intercepts incoming missiles & hits nearby ships
+    function firePulseLaser() {
+      if (gameState !== 'PLAYING') return;
+      const w = player.weapons.pulse;
+      if (w.timer < w.cd) return;
+
+      initAudio();
+      w.timer = 0;
+      Sound.laser();
+
+      // Broadside vectors (perpendicular to player angle)
+      const leftAngle = player.angle - Math.PI / 2;
+      const rightAngle = player.angle + Math.PI / 2;
+
+      // 4 laser bolts: 2 left, 2 right with slight forward spread
+      const angles = [
+        leftAngle - 0.25, leftAngle + 0.25,
+        rightAngle - 0.25, rightAngle + 0.25
+      ];
+
+      angles.forEach((ang, idx) => {
+        const offsetDist = 12;
+        const sideOffset = idx < 2 ? -12 : 12;
+        const ox = player.x + Math.cos(player.angle) * -4 + Math.cos(player.angle + Math.PI / 2) * sideOffset;
+        const oy = player.y + Math.sin(player.angle) * -4 + Math.sin(player.angle + Math.PI / 2) * sideOffset;
+
+        projectiles.push({
+          type: 'laser',
+          x: ox,
+          y: oy,
+          vx: Math.cos(ang) * 9,
+          vy: Math.sin(ang) * 9,
+          damage: 18,
+          life: 0.65,
+          color: '#34d399'
+        });
+      });
+    }
+
+    // 2. SHOCK CANNONS: Frontal Main Turrets (Three triple shock blasts, massive punch forward)
+    function fireShockCannon() {
+      if (gameState !== 'PLAYING') return;
+      const w = player.weapons.shock;
+      if (w.timer < w.cd) return;
+
+      initAudio();
+      w.timer = 0;
+      Sound.shockCannon();
+
+      // Shock cannons fire in the forward firing arc (-30 to +30 degrees)
+      const forwardOffsets = [-0.12, 0, 0.12];
+      forwardOffsets.forEach((spr, i) => {
+        const ang = player.angle + spr;
+        const muzzleX = player.x + Math.cos(player.angle) * (18 - i * 6);
+        const muzzleY = player.y + Math.sin(player.angle) * (18 - i * 6);
+
+        projectiles.push({
+          type: 'shock',
+          x: muzzleX,
+          y: muzzleY,
+          vx: Math.cos(ang) * 11,
+          vy: Math.sin(ang) * 11,
+          damage: 55,
+          life: 1.1,
+          color: '#fbbf24'
+        });
+
+        // Muzzle blast smoke/light
+        createSparks(muzzleX, muzzleY, '#f59e0b', 8);
+      });
+    }
+
+    // 3. TORPEDO SALVO: 4 heavy tracking torpedoes launched from the bow
+    function fireTorpedoes() {
+      if (gameState !== 'PLAYING') return;
+      const w = player.weapons.torpedo;
+      if (w.timer < w.cd) return;
+
+      initAudio();
+      w.timer = 0;
+      Sound.torpedo();
+
+      [-0.3, -0.1, 0.1, 0.3].forEach((spread) => {
+        const launchAngle = player.angle + spread;
+        const bx = player.x + Math.cos(player.angle) * 22;
+        const by = player.y + Math.sin(player.angle) * 22;
+
+        projectiles.push({
+          type: 'torpedo',
+          x: bx,
+          y: by,
+          vx: Math.cos(launchAngle) * 3.5,
+          vy: Math.sin(launchAngle) * 3.5,
+          angle: launchAngle,
+          damage: 90,
+          life: 3.5,
+          color: '#38bdf8',
+          tracking: true
+        });
+      });
+    }
+
+    // 4. WAVE MOTION CANNON (波動砲): Pierces through entire map in ship's forward axis
+    function fireWaveMotionCannon() {
+      if (gameState !== 'PLAYING') return;
+      const w = player.weapons.wave;
+      if (w.timer < w.cd) return;
+
+      initAudio();
+      w.timer = 0; // Reset ATB
+      Sound.waveCannon();
+
+      waveBeam = {
+        originX: player.x,
+        originY: player.y,
+        angle: player.angle,
+        length: Math.max(viewWidth, viewHeight) * 1.5,
+        duration: 0.9, // seconds active
+        timer: 0.9,
+        width: 32
+      };
+
+      // Screen shockwave
+      createSparks(player.x, player.y, '#ef4444', 30);
+    }
+
+    // EMERGENCY REPAIR
+    function triggerRepair() {
+      if (gameState !== 'PLAYING') return;
+      if (player.repairCD.timer < player.repairCD.cd) return;
+      initAudio();
+      player.repairCD.timer = 0;
+      player.hull = Math.min(player.maxHull, player.hull + 75);
+      player.shield = Math.min(player.maxShield, player.shield + 50);
+      Sound.ping();
+      createSparks(player.x, player.y, '#34d399', 20);
+    }
+
+    // TACTICAL EVASION / EMERGENCY REVERSE THRUST
+    function tacticalEvasion() {
+      if (gameState !== 'PLAYING') return;
+      if (player.evasionCD.timer < player.evasionCD.cd) return;
+      initAudio();
+      player.evasionCD.timer = 0;
+      // Instant 180 reverse maneuver & burst impulse
+      player.angle += Math.PI;
+      player.vx = -Math.cos(player.angle) * 4.5;
+      player.vy = -Math.sin(player.angle) * 4.5;
+      Sound.shockCannon();
+      postBridgeLog('操舵室: 緊急戦術回頭！全スラスタ逆噴射！', 'text-amber-300');
+      createSparks(player.x, player.y, '#38bdf8', 22);
+    }
+
+    // Particles Utility
+    function createSparks(x, y, color, count = 10) {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const spd = Math.random() * 3 + 1;
+        particles.push({
+          x, y,
+          vx: Math.cos(a) * spd,
+          vy: Math.sin(a) * spd,
+          color,
+          alpha: 1,
+          size: Math.random() * 2.5 + 1.2,
+          decay: Math.random() * 0.03 + 0.02
+        });
+      }
+    }
+
+    // Hook buttons to actions
+    document.getElementById('btn-pulse').onclick = () => { initAudio(); firePulseLaser(); };
+    document.getElementById('btn-shock').onclick = () => { initAudio(); fireShockCannon(); };
+    document.getElementById('btn-torpedo').onclick = () => { initAudio(); fireTorpedoes(); };
+    document.getElementById('btn-wave').onclick = () => { initAudio(); fireWaveMotionCannon(); };
+    document.getElementById('btn-evasion').onclick = () => { initAudio(); tacticalEvasion(); };
+    document.getElementById('btn-repair').onclick = () => { initAudio(); triggerRepair(); };
+
+    // --- GAME LOOP & UPDATES ---
+    function update(dt) {
+      if (gameState !== 'PLAYING') return;
+
+      if (screenShake > 0) screenShake = Math.max(0, screenShake - dt * 30);
+
+      // 1. AUTOPILOT AI FOR PLAYER (Tactical Navigation)
+      let targetEnemy = null;
+      let minEnemyDist = 99999;
+      enemies.forEach(e => {
+        const d = Math.hypot(e.x - player.x, e.y - player.y);
+        if (d < minEnemyDist) {
+          minEnemyDist = d;
+          targetEnemy = e;
+        }
+      });
+
+      if (targetEnemy) {
+        const toEnemyAngle = Math.atan2(targetEnemy.y - player.y, targetEnemy.x - player.x);
+
+        if (autoPilotMode === 'broadside') {
+          // Broadside: Maintain ~170px distance, angle ship sideways (+/- 90 deg)
+          const desiredDist = 180;
+          const distDiff = minEnemyDist - desiredDist;
+          const perpAngle = toEnemyAngle + Math.PI / 2;
+
+          player.targetAngle = (Math.abs(distDiff) < 60) ? perpAngle : toEnemyAngle + (distDiff < 0 ? Math.PI : 0);
+          player.speed = Math.min(player.maxSpeed, Math.max(0.6, Math.abs(distDiff) * 0.02));
+        } else if (autoPilotMode === 'assault') {
+          // Assault: Charge straight at nearest enemy
+          player.targetAngle = toEnemyAngle;
+          player.speed = player.maxSpeed;
+        } else if (autoPilotMode === 'kite') {
+          // Kite: Keep long distance (> 260px)
+          if (minEnemyDist < 250) {
+            player.targetAngle = toEnemyAngle + Math.PI; // Retreat
+            player.speed = player.maxSpeed;
+          } else if (minEnemyDist > 340) {
+            player.targetAngle = toEnemyAngle; // Close in slightly
+            player.speed = player.maxSpeed * 0.7;
+          } else {
+            player.targetAngle = toEnemyAngle;
+            player.speed = 0.4;
+          }
+        }
+      } else {
+        // Cruise slowly to screen center if no enemies
+        const toCenter = Math.atan2(viewHeight / 2 - player.y, viewWidth / 2 - player.x);
+        player.targetAngle = toCenter;
+        player.speed = 0.8;
+      }
+
+      // Smooth steering toward targetAngle
+      let angleDiff = player.targetAngle - player.angle;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      player.angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), player.turnSpeed);
+
+      // Apply forward thrust into velocity
+      player.vx += Math.cos(player.angle) * player.speed * 0.15;
+      player.vy += Math.sin(player.angle) * player.speed * 0.15;
+      // Friction damping
+      player.vx *= 0.92;
+      player.vy *= 0.92;
+
+      player.x += player.vx;
+      player.y += player.vy;
+
+      // Engine trail particles
+      if (Math.random() < 0.6) {
+        const ex = player.x - Math.cos(player.angle) * (player.radius * 0.9);
+        const ey = player.y - Math.sin(player.angle) * (player.radius * 0.9);
+        particles.push({
+          x: ex + (Math.random() - 0.5) * 5,
+          y: ey + (Math.random() - 0.5) * 5,
+          vx: -Math.cos(player.angle) * 1.5 + (Math.random() - 0.5) * 0.4,
+          vy: -Math.sin(player.angle) * 1.5 + (Math.random() - 0.5) * 0.4,
+          color: '#38bdf8',
+          alpha: 0.8,
+          size: 2.2,
+          decay: 0.05
+        });
+      }
+
+      // Screen edge boundary wraps / constraints
+      if (player.x < 30) { player.x = 30; player.vx *= -0.5; }
+      if (player.x > viewWidth - 30) { player.x = viewWidth - 30; player.vx *= -0.5; }
+      if (player.y < 30) { player.y = 30; player.vy *= -0.5; }
+      if (player.y > viewHeight - 30) { player.y = viewHeight - 30; player.vy *= -0.5; }
+
+      // Shield Passive Recharge
+      if (player.shield < player.maxShield) {
+        player.shield = Math.min(player.maxShield, player.shield + player.shieldRegen * dt);
+      }
+
+      // 2. Weapon Timers (ATB)
+      Object.keys(player.weapons).forEach(k => {
+        const w = player.weapons[k];
+        if (w.timer < w.cd) {
+          w.timer += dt;
+          if (w.timer >= w.cd) {
+            w.timer = w.cd;
+          }
+        }
+      });
+      if (player.evasionCD.timer < player.evasionCD.cd) player.evasionCD.timer += dt;
+      if (player.repairCD.timer < player.repairCD.cd) player.repairCD.timer += dt;
+
+      // 3. Wave Beam Active Check
+      if (waveBeam) {
+        waveBeam.timer -= dt;
+        waveBeam.originX = player.x;
+        waveBeam.originY = player.y;
+        waveBeam.angle = player.angle;
+
+        // Hit test all enemies along line
+        enemies.forEach(en => {
+          // Point-to-line distance
+          const dx = en.x - waveBeam.originX;
+          const dy = en.y - waveBeam.originY;
+          const beamDirX = Math.cos(waveBeam.angle);
+          const beamDirY = Math.sin(waveBeam.angle);
+          const proj = dx * beamDirX + dy * beamDirY;
+
+          if (proj > 0 && proj < waveBeam.length) {
+            const perpDist = Math.abs(-beamDirY * dx + beamDirX * dy);
+            if (perpDist < waveBeam.width + 15) {
+              en.hp -= 250 * dt; // Rapid continuous disintegration
+              createSparks(en.x, en.y, '#ef4444', 3);
+            }
+          }
+        });
+
+        // Also vaporize incoming enemy missiles
+        enemyProjectiles = enemyProjectiles.filter(ep => {
+          const dx = ep.x - waveBeam.originX;
+          const dy = ep.y - waveBeam.originY;
+          const proj = dx * Math.cos(waveBeam.angle) + dy * Math.sin(waveBeam.angle);
+          if (proj > 0 && proj < waveBeam.length) {
+            const perpDist = Math.abs(-Math.sin(waveBeam.angle) * dx + Math.cos(waveBeam.angle) * dy);
+            if (perpDist < waveBeam.width + 10) {
+              createSparks(ep.x, ep.y, '#f87171', 4);
+              return false;
+            }
+          }
+          return true;
+        });
+
+        if (waveBeam.timer <= 0) {
+          waveBeam = null;
+        }
+      }
+
+      // 4. Update Friendly Projectiles
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        p.life -= dt;
+
+        // Torpedo target homing
+        if (p.tracking && enemies.length > 0) {
+          // Find nearest enemy
+          let nearest = null;
+          let minDist = 9999;
+          enemies.forEach(e => {
+            const d = Math.hypot(e.x - p.x, e.y - p.y);
+            if (d < minDist) {
+              minDist = d;
+              nearest = e;
+            }
+          });
+
+          if (nearest && minDist < 450) {
+            const targetAngle = Math.atan2(nearest.y - p.y, nearest.x - p.x);
+            let diff = targetAngle - p.angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            p.angle += Math.sign(diff) * Math.min(Math.abs(diff), 0.06);
+            p.vx = Math.cos(p.angle) * 5.5;
+            p.vy = Math.sin(p.angle) * 5.5;
+
+            // Torpedo bubble trail
+            if (Math.random() < 0.4) {
+              particles.push({
+                x: p.x, y: p.y,
+                vx: -p.vx * 0.2, vy: -p.vy * 0.2,
+                color: '#38bdf8', alpha: 0.6, size: 1.5, decay: 0.05
+              });
+            }
+          }
+        }
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Check Hit vs Enemies
+        let hit = false;
+        for (let j = 0; j < enemies.length; j++) {
+          const en = enemies[j];
+          const hitRadius = en.type === 'dreadnought' ? 28 : (en.type === 'cruiser' ? 20 : 14);
+          if (Math.hypot(en.x - p.x, en.y - p.y) < hitRadius) {
+            en.hp -= p.damage;
+            hit = true;
+            createSparks(p.x, p.y, p.color, 8);
+            Sound.explosion(false);
+            break;
+          }
+        }
+
+        // Pulse Laser can also shoot down enemy torpedoes! (Yamato Point Defense)
+        if (!hit && p.type === 'laser') {
+          for (let k = enemyProjectiles.length - 1; k >= 0; k--) {
+            const ep = enemyProjectiles[k];
+            if (ep.type === 'torpedo' && Math.hypot(ep.x - p.x, ep.y - p.y) < 16) {
+              createSparks(ep.x, ep.y, '#34d399', 10);
+              enemyProjectiles.splice(k, 1);
+              hit = true;
+              break;
+            }
+          }
+        }
+
+        if (hit || p.life <= 0) {
+          projectiles.splice(i, 1);
+        }
+      }
+
+      // 5. Update Enemies AI & Movement
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const en = enemies[i];
+
+        const toPlayerAngle = Math.atan2(player.y - en.y, player.x - en.x);
+        const distToPlayer = Math.hypot(player.x - en.x, player.y - en.y);
+
+        if (en.type === 'corvette') {
+          en.angle = toPlayerAngle + Math.sin(performance.now() * 0.002) * 0.6;
+          en.vx += Math.cos(en.angle) * en.speed * 0.12;
+          en.vy += Math.sin(en.angle) * en.speed * 0.12;
+        } else if (en.type === 'cruiser') {
+          let moveAng = toPlayerAngle;
+          if (distToPlayer > 220) moveAng = toPlayerAngle;
+          else if (distToPlayer < 140) moveAng = toPlayerAngle + Math.PI;
+          else moveAng = toPlayerAngle + Math.PI / 2;
+          en.angle = moveAng;
+          en.vx += Math.cos(en.angle) * en.speed * 0.1;
+          en.vy += Math.sin(en.angle) * en.speed * 0.1;
+        } else if (en.type === 'dreadnought') {
+          en.angle = toPlayerAngle;
+          en.vx += Math.cos(en.angle) * en.speed * 0.08;
+          en.vy += Math.sin(en.angle) * en.speed * 0.08;
+        }
+
+        en.vx *= 0.94;
+        en.vy *= 0.94;
+        en.x += en.vx;
+        en.y += en.vy;
+
+        // Enemy Weapon Shooting
+        en.shootCooldown -= dt;
+        if (en.shootCooldown <= 0) {
+          if (en.type === 'corvette') {
+            // Rapid light laser
+            en.shootCooldown = 2.2 + Math.random() * 1.0;
+            enemyProjectiles.push({
+              type: 'laser',
+              x: en.x, y: en.y,
+              vx: Math.cos(toPlayerAngle) * 5.2,
+              vy: Math.sin(toPlayerAngle) * 5.2,
+              damage: 12,
+              life: 1.8,
+              color: '#f87171'
+            });
+          } else if (en.type === 'cruiser') {
+            // Launch red torpedo
+            en.shootCooldown = 4.0 + Math.random() * 1.5;
+            enemyProjectiles.push({
+              type: 'torpedo',
+              x: en.x, y: en.y,
+              vx: Math.cos(toPlayerAngle) * 3.2,
+              vy: Math.sin(toPlayerAngle) * 3.2,
+              angle: toPlayerAngle,
+              damage: 35,
+              life: 4.5,
+              color: '#ef4444'
+            });
+          } else if (en.type === 'dreadnought') {
+            // Heavy plasma cannon
+            en.shootCooldown = 3.5;
+            for (let b = -1; b <= 1; b++) {
+              const ang = toPlayerAngle + b * 0.18;
+              enemyProjectiles.push({
+                type: 'laser',
+                x: en.x, y: en.y,
+                vx: Math.cos(ang) * 4.8,
+                vy: Math.sin(ang) * 4.8,
+                damage: 25,
+                life: 2.2,
+                color: '#e11d48'
+              });
+            }
+          }
+        }
+
+        // Death Check
+        if (en.hp <= 0) {
+          const pt = en.type === 'dreadnought' ? 350 : (en.type === 'cruiser' ? 150 : 80);
+          score += pt;
+          document.getElementById('ui-score').innerText = String(score).padStart(5, '0');
+          createSparks(en.x, en.y, '#f59e0b', en.type === 'dreadnought' ? 40 : 20);
+          Sound.explosion(en.type === 'dreadnought');
+          enemies.splice(i, 1);
+          updateEnemyCountHUD();
+        }
+      }
+
+      // 5.5 STRICT ANTI-COLLISION & ELASTIC BOUNCE PHYSICS
+      // A. Player vs All Enemies (Hard separation + violent bounce)
+      enemies.forEach(en => {
+        const dx = en.x - player.x;
+        const dy = en.y - player.y;
+        const dist = Math.hypot(dx, dy);
+        const minDist = player.radius + en.radius;
+
+        if (dist < minDist && dist > 0.001) {
+          // Normal vector
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const overlap = minDist - dist;
+
+          // 1. HARD DE-PENETRATION (Separate instantly according to mass)
+          const totalMass = player.mass + en.mass;
+          const pRatio = en.mass / totalMass;
+          const eRatio = player.mass / totalMass;
+
+          player.x -= nx * overlap * pRatio;
+          player.y -= ny * overlap * pRatio;
+          en.x += nx * overlap * eRatio;
+          en.y += ny * overlap * eRatio;
+
+          // 2. ELASTIC REBOUND IMPULSE (ガツンと強烈に弾き飛ばす)
+          const kx = player.vx - en.vx;
+          const ky = player.vy - en.vy;
+          const p = 2 * (nx * kx + ny * ky) / totalMass;
+
+          // Extra rebound pop force
+          const bounceForce = 4.2;
+          player.vx -= (p * en.mass + bounceForce * pRatio) * nx;
+          player.vy -= (p * en.mass + bounceForce * pRatio) * ny;
+          en.vx += (p * player.mass + bounceForce * eRatio) * nx;
+          en.vy += (p * player.mass + bounceForce * eRatio) * ny;
+
+          // Sound, screen shake & debris
+          Sound.collision();
+          screenShake = 14;
+          createSparks((player.x + en.x) / 2, (player.y + en.y) / 2, '#f59e0b', 24);
+
+          // Ramming damage to both
+          takeDamage(15);
+          en.hp -= 25;
+          postBridgeLog('操舵室: 敵艦と艦体衝突！弾幕展開、距離を取れ！', 'text-amber-400');
+        }
+      });
+
+      // B. Enemy vs Enemy (No overlap, clean separation)
+      for (let i = 0; i < enemies.length; i++) {
+        for (let j = i + 1; j < enemies.length; j++) {
+          const e1 = enemies[i];
+          const e2 = enemies[j];
+          const dx = e2.x - e1.x;
+          const dy = e2.y - e1.y;
+          const dist = Math.hypot(dx, dy);
+          const minDist = e1.radius + e2.radius;
+
+          if (dist < minDist && dist > 0.001) {
+            const nx = dx / dist;
+            const ny = dy / dist;
+            const overlap = minDist - dist;
+
+            e1.x -= nx * overlap * 0.5;
+            e1.y -= ny * overlap * 0.5;
+            e2.x += nx * overlap * 0.5;
+            e2.y += ny * overlap * 0.5;
+
+            // Small bounce
+            e1.vx -= nx * 1.5;
+            e1.vy -= ny * 1.5;
+            e2.vx += nx * 1.5;
+            e2.vy += ny * 1.5;
+          }
+        }
+      }
+
+      // 6. Update Enemy Projectiles & Damage to Player
+      for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+        const ep = enemyProjectiles[i];
+        ep.life -= dt;
+
+        // Enemy Torpedoes track player slightly
+        if (ep.type === 'torpedo') {
+          const angToPlayer = Math.atan2(player.y - ep.y, player.x - ep.x);
+          let diff = angToPlayer - ep.angle;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          ep.angle += Math.sign(diff) * Math.min(Math.abs(diff), 0.035);
+          ep.vx = Math.cos(ep.angle) * 3.2;
+          ep.vy = Math.sin(ep.angle) * 3.2;
+
+          if (Math.random() < 0.3) {
+            particles.push({
+              x: ep.x, y: ep.y,
+              vx: -ep.vx * 0.1, vy: -ep.vy * 0.1,
+              color: '#ef4444', alpha: 0.6, size: 1.5, decay: 0.06
+            });
+          }
+        }
+
+        ep.x += ep.vx;
+        ep.y += ep.vy;
+
+        // Collision with player
+        if (Math.hypot(player.x - ep.x, player.y - ep.y) < player.size * 0.45) {
+          takeDamage(ep.damage);
+          createSparks(ep.x, ep.y, ep.color, 10);
+          enemyProjectiles.splice(i, 1);
+          continue;
+        }
+
+        if (ep.life <= 0) {
+          enemyProjectiles.splice(i, 1);
+        }
+      }
+
+      // 7. Update Particles
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const pt = particles[i];
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+        pt.alpha -= pt.decay;
+        if (pt.alpha <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+
+      // 8. Check Wave Clear
+      if (enemies.length === 0 && gameState === 'PLAYING') {
+        gameState = 'WAVECLEAR';
+        setTimeout(() => {
+          wave++;
+          document.getElementById('ui-wave').innerText = wave;
+          // Wave clear repair bonus
+          player.hull = Math.min(player.maxHull, player.hull + 60);
+          player.shield = player.maxShield;
+          showModal('WAVE ' + (wave - 1) + ' CLEARED', '敵艦隊の壊滅を確認。艦体修復及びシールドチャージ完了。次期ワープ艦隊が接近中！', 'NEXT BATTLE WAVE');
+        }, 1200);
+      }
+
+      // Update HUD Gauges
+      updateHUD();
+    }
+
+    function takeDamage(dmg) {
+      if (player.shield > 0) {
+        player.shield -= dmg;
+        if (player.shield < 0) {
+          player.hull += player.shield; // Overflow to hull
+          player.shield = 0;
+        }
+      } else {
+        player.hull -= dmg;
+      }
+
+      Sound.explosion(false);
+
+      if (player.hull <= 0) {
+        player.hull = 0;
+        gameState = 'GAMEOVER';
+        createSparks(player.x, player.y, '#f97316', 50);
+        showModal('WARSHIP LOST', `ヤマト轟沈。地球防衛戦線崩壊... 到達WAVE: ${wave} / 最終スコア: ${score}`, 'RETRY MISSION');
+      }
+    }
+
+    function updateHUD() {
+      // Shield & Hull Bars
+      const sPct = Math.max(0, (player.shield / player.maxShield) * 100);
+      const hPct = Math.max(0, (player.hull / player.maxHull) * 100);
+      document.getElementById('ui-shield-bar').style.width = sPct + '%';
+      document.getElementById('ui-shield-val').innerText = Math.round(sPct) + '%';
+      document.getElementById('ui-hull-bar').style.width = hPct + '%';
+      document.getElementById('ui-hull-val').innerText = Math.round(hPct) + '%';
+
+      // Weapon ATB Bars
+      const p = player.weapons.pulse;
+      const s = player.weapons.shock;
+      const t = player.weapons.torpedo;
+      const w = player.weapons.wave;
+
+      updateCooldownBar('bar-pulse', 'cd-pulse-text', p.timer, p.cd);
+      updateCooldownBar('bar-shock', 'cd-shock-text', s.timer, s.cd);
+      updateCooldownBar('bar-torpedo', 'cd-torpedo-text', t.timer, t.cd);
+      updateCooldownBar('bar-wave', 'cd-wave-text', w.timer, w.cd, 'CHARGED');
+
+      updateCooldownBar(null, 'cd-evasion-text', player.evasionCD.timer, player.evasionCD.cd);
+      updateCooldownBar(null, 'cd-repair-text', player.repairCD.timer, player.repairCD.cd);
+    }
+
+    function updateCooldownBar(barId, textId, current, max, readyLabel = 'READY') {
+      const pct = Math.min(100, (current / max) * 100);
+      if (barId) {
+        document.getElementById(barId).style.width = pct + '%';
+      }
+      const txt = document.getElementById(textId);
+      if (pct >= 100) {
+        txt.innerText = readyLabel;
+        txt.className = 'text-[10px] text-emerald-400 font-mono font-bold';
+      } else {
+        const remaining = (max - current).toFixed(1);
+        txt.innerText = remaining + 's';
+        txt.className = 'text-[10px] text-slate-500 font-mono';
+      }
+    }
+
+    // --- RENDER FUNCTION ---
+    function render() {
+      ctx.save();
+      // Apply Screen Shake if active
+      if (screenShake > 0) {
+        const sx = (Math.random() - 0.5) * screenShake;
+        const sy = (Math.random() - 0.5) * screenShake;
+        ctx.translate(sx, sy);
+      }
+
+      ctx.clearRect(0, 0, viewWidth, viewHeight);
+
+      // 1. Draw Starfield
+      ctx.fillStyle = '#ffffff';
+      stars.forEach(st => {
+        ctx.globalAlpha = st.alpha;
+        ctx.fillRect(st.x % viewWidth, st.y % viewHeight, st.size, st.size);
+      });
+      ctx.globalAlpha = 1.0;
+
+      // 2. Draw Radar Circles & Grid (PS1 Yamato Tactical View feeling)
+      ctx.strokeStyle = 'rgba(6, 182, 212, 0.08)';
+      ctx.lineWidth = 1;
+      const cx = player.x;
+      const cy = player.y;
+
+      for (let r = 80; r <= 360; r += 90) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Draw Broadside & Forward Firing Arc Cones
+      drawWeaponArcs();
+
+      // 3. Draw Wave Motion Beam (if firing)
+      if (waveBeam) {
+        ctx.save();
+        ctx.translate(waveBeam.originX, waveBeam.originY);
+        ctx.rotate(waveBeam.angle);
+
+        // Beam gradient
+        const beamGrad = ctx.createLinearGradient(0, -waveBeam.width, 0, waveBeam.width);
+        beamGrad.addColorStop(0, 'rgba(239, 68, 68, 0)');
+        beamGrad.addColorStop(0.3, 'rgba(248, 113, 113, 0.7)');
+        beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 1)');
+        beamGrad.addColorStop(0.7, 'rgba(248, 113, 113, 0.7)');
+        beamGrad.addColorStop(1, 'rgba(239, 68, 68, 0)');
+
+        ctx.fillStyle = beamGrad;
+        ctx.fillRect(0, -waveBeam.width, waveBeam.length, waveBeam.width * 2);
+
+        // Core bright thread
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, -4, waveBeam.length, 8);
+
+        ctx.restore();
+      }
+
+      // 4. Draw Projectiles
+      projectiles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        if (p.type === 'laser') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.type === 'shock') {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.type === 'torpedo') {
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.angle);
+          ctx.fillRect(-6, -2, 12, 4);
+          ctx.restore();
+        }
+        ctx.shadowBlur = 0;
+      });
+
+      // 5. Draw Enemy Projectiles
+      enemyProjectiles.forEach(ep => {
+        ctx.fillStyle = ep.color;
+        ctx.shadowColor = ep.color;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        if (ep.type === 'torpedo') {
+          ctx.arc(ep.x, ep.y, 4, 0, Math.PI * 2);
+        } else {
+          ctx.arc(ep.x, ep.y, 2.5, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      });
+
+      // 6. Draw Particles
+      particles.forEach(pt => {
+        ctx.fillStyle = pt.color;
+        ctx.globalAlpha = pt.alpha;
+        ctx.fillRect(pt.x, pt.y, pt.size, pt.size);
+      });
+      ctx.globalAlpha = 1.0;
+
+      // 7. Draw Enemies
+      enemies.forEach(en => {
+        drawEnemyWarship(en);
+      });
+
+      // 8. Draw Player Battleship (Yamato Silhouette)
+      drawPlayerYamato();
+
+      ctx.restore();
+    }
+
+    // Helper: Draw Weapon Firing Arcs (Forward & Broadside)
+    function drawWeaponArcs() {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+
+      // Forward Shock Cannon Arc (~60 degrees cone)
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.04)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 240, player.angle - Math.PI / 6, player.angle + Math.PI / 6);
+      ctx.closePath();
+      ctx.fill();
+
+      // Broadside Left Arc
+      ctx.fillStyle = 'rgba(52, 211, 153, 0.03)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 160, player.angle - Math.PI * 0.7, player.angle - Math.PI * 0.3);
+      ctx.closePath();
+      ctx.fill();
+
+      // Broadside Right Arc
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 160, player.angle + Math.PI * 0.3, player.angle + Math.PI * 0.7);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Draw Yamato Style Battleship
+    function drawPlayerYamato() {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      ctx.rotate(player.angle);
+
+      const shipLen = player.radius * 2;
+
+      // Deflector Shield Bubble (if shield active)
+      if (player.shield > 0) {
+        ctx.strokeStyle = `rgba(56, 189, 248, ${0.15 + (player.shield / player.maxShield) * 0.25})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, shipLen * 0.75, shipLen * 0.45, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Hull Drawing
+      ctx.fillStyle = '#1e293b'; // Dark Battleship Blue/Grey
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 1.5;
+
+      ctx.beginPath();
+      // Bow / Wave Motion Bow opening
+      ctx.moveTo(shipLen * 0.6, 0);
+      ctx.lineTo(shipLen * 0.3, -8);
+      ctx.lineTo(-shipLen * 0.3, -10);
+      ctx.lineTo(-shipLen * 0.5, -6);
+      // Stern engine
+      ctx.lineTo(-shipLen * 0.5, 6);
+      ctx.lineTo(-shipLen * 0.3, 10);
+      ctx.lineTo(shipLen * 0.3, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Bridge Tower
+      ctx.fillStyle = '#0ea5e9';
+      ctx.fillRect(-shipLen * 0.1, -3, 8, 6);
+
+      // Red Wave Cannon Muzzle Glow
+      ctx.fillStyle = player.weapons.wave.timer >= player.weapons.wave.cd ? '#ef4444' : '#64748b';
+      ctx.beginPath();
+      ctx.arc(shipLen * 0.55, 0, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Draw Alien Warships
+    function drawEnemyWarship(en) {
+      ctx.save();
+      ctx.translate(en.x, en.y);
+      ctx.rotate(en.angle);
+
+      if (en.type === 'corvette') {
+        // Fast interceptor triangle
+        ctx.fillStyle = '#450a0a';
+        ctx.strokeStyle = '#f87171';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(12, 0);
+        ctx.lineTo(-8, -7);
+        ctx.lineTo(-4, 0);
+        ctx.lineTo(-8, 7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (en.type === 'cruiser') {
+        // Sleek alien cruiser
+        ctx.fillStyle = '#2e1065';
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(18, 0);
+        ctx.lineTo(6, -10);
+        ctx.lineTo(-14, -8);
+        ctx.lineTo(-18, 0);
+        ctx.lineTo(-14, 8);
+        ctx.lineTo(6, 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (en.type === 'dreadnought') {
+        // Massive heavy carrier
+        ctx.fillStyle = '#1c1917';
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(26, -5);
+        ctx.lineTo(26, 5);
+        ctx.lineTo(10, 16);
+        ctx.lineTo(-24, 14);
+        ctx.lineTo(-20, 0);
+        ctx.lineTo(-24, -14);
+        ctx.lineTo(10, -16);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Enemy HP Bar
+      const hpPct = en.hp / en.maxHp;
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(-14, -18, 28, 3);
+      ctx.fillStyle = hpPct > 0.4 ? '#ef4444' : '#dc2626';
+      ctx.fillRect(-14, -18, 28 * hpPct, 3);
+
+      ctx.restore();
+    }
+
+    // --- MODAL CONTROLLER ---
+    const modalContainer = document.getElementById('modal-container');
+    const modalTitle = document.getElementById('modal-title');
+    const modalDesc = document.getElementById('modal-desc');
+    const btnModalStart = document.getElementById('btn-modal-start');
+
+    function showModal(title, desc, buttonText) {
+      modalTitle.innerText = title;
+      modalDesc.innerText = desc;
+      btnModalStart.innerText = buttonText;
+      modalContainer.classList.remove('hidden');
+      modalContainer.style.opacity = '1';
+      modalContainer.style.pointerEvents = 'auto';
+    }
+
+    function hideModal() {
+      modalContainer.style.opacity = '0';
+      modalContainer.style.pointerEvents = 'none';
+      setTimeout(() => {
+        modalContainer.classList.add('hidden');
+      }, 200);
+    }
+
+    btnModalStart.addEventListener('click', () => {
+      initAudio();
+      hideModal();
+
+      if (gameState === 'GAMEOVER') {
+        // Reset full game
+        wave = 1;
+        score = 0;
+        player.hull = player.maxHull;
+        player.shield = player.maxShield;
+        document.getElementById('ui-wave').innerText = '1';
+        document.getElementById('ui-score').innerText = '00000';
+      }
+
+      // Reset Battleship Position to center
+      player.x = viewWidth / 2;
+      player.y = viewHeight / 2;
+      player.speed = 0;
+
+      // Start Wave
+      gameState = 'PLAYING';
+      spawnWave(wave);
+    });
+
+    // --- MAIN ANIMATION LOOP ---
+    function gameLoop(time) {
+      const dt = Math.min((time - lastTime) / 1000, 0.1);
+      lastTime = time;
+
+      update(dt);
+      render();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- STARTUP INITIALIZATION ---
+    window.onload = function() {
+      resizeCanvas();
+      initStars();
+      player.x = viewWidth / 2;
+      player.y = viewHeight / 2;
+      updateHUD();
+      requestAnimationFrame(gameLoop);
+    };
+  </script>
+</body>
+</html>
